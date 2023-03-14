@@ -1,0 +1,129 @@
+---
+- name: Instalar AppWeb con Ansible
+  gather_facts: false
+  hosts: all
+  become: true
+  tasks:
+
+    #- Instale los paquetes necesarios para que su aplicación web funcione.
+    - name: Actualizar cache de los paquetes
+      apt:
+        update_cache: yes
+
+    - name: Instalar los paquetes necesarios
+      apt:
+        name: ['apache2','php','mysql-server','pip','php-mysqli','libapache2-mod-php','python3-mysqldb']
+
+    #- Crear una pagina web personal.
+    - name: Configurar IP en apache
+      lineinfile:
+        path: /etc/apache2/sites-available/000-default.conf
+        regexp: '^Server'
+        line: 'Server 192.168.0.184'
+
+    - name: Configurar sitio web
+      copy:
+        dest: /etc/apache2/sites-available/000-default.conf
+        content: |
+          <VirtualHost *:80>
+            ServerName www.lmhernandezcalvillo.com
+            ServerAlias www.lmhernandezcalvillo.com
+            DocumentRoot /var/www/html
+            ErrorLog ${APACHE_LOG_DIR}/error.log
+            CustomLog ${APACHE_LOG_DIR}/access.log combined
+          </VirtualHost>
+
+    - name: Copiar pagina web
+      copy:
+        src: index.html
+        dest: /var/www/html/
+        owner: www-data
+        group: www-data
+        mode: 0750
+
+    #- Cree un nuevo VirtualHost dentro del servidor web y configure un root de documentos específico para ello.
+    - name: Crear directorio del sitio
+      file:
+        path: /var/www/app.lmhernandezcalvillo.com
+        state: directory
+
+    - name: Copiar sitio web al directorio
+      copy:
+        src: ProyectoWEB/
+        dest: /var/www/html/
+        owner: www-data
+        group: www-data
+        mode: 0750
+
+    - name: Crear archivo de configuración
+      file:
+        path: /etc/apache2/sites-available/app.lmhernandezcalvillo.com.conf
+        state: touch
+        mode: 0750
+
+    - name: Configurar sitio web
+      copy:
+        dest: /etc/apache2/sites-available/app.lmhernandezcalvillo.com.conf
+        content: |
+          <VirtualHost *:80>
+            ServerName app.lmhernandezcalvillo.com
+            ServerAlias app.lmhernandezcalvillo.com
+            DocumentRoot /var/www/app.lmhernandezcalvillo.com
+            ErrorLog ${APACHE_LOG_DIR}/error.log
+            CustomLog ${APACHE_LOG_DIR}/access.log combined
+          </VirtualHost>
+
+    #- Habilite el nuevo VirtualHost.
+    - name: Habilitar VirtualHost
+      shell: a2ensite app.lmhernandezcalvillo.com.conf
+
+    - name: Reiniciar apache
+      shell: systemctl restart apache2
+
+    #- Establezca la contraseña para el usuario administrador de la base de datos.
+    #- Cargue su esquema de bases de datos en el servidor.
+    - name: Iniciar servicio de MySQL
+      shell: systemctl start mysql
+    
+    - name: Copiar archivo .sql al servidor remoto
+      copy:
+        src: demo.sql
+        dest: /tmp/demo.sql
+
+    - name: Importar base de datos
+      ignore_errors: yes
+      mysql_db: 
+        name: demo
+        state: import
+        target: /tmp/demo.sql
+        login_user: "root"
+        login_password: "123456789"
+
+    #- Elimine las cuentas anónimas y la base de datos de prueba.
+    - name: Eliminar cuentas anónimas
+      mysql_db:
+        login_user: 'root'
+        login_password: '123456789'
+        login_host: localhost
+        name: ""
+        state: absent
+      become: true
+      become_user: root
+
+    - name: Eliminar base de datos de prueba
+      mysql_db: 
+        login_user: 'root'
+        login_password: '123456789'
+        login_host: localhost
+        name: test
+        state: absent
+      become: true
+      become_user: root
+
+    #- Configure el firewall para que permita el tráfico HTTP en el puerto configurado (por defecto, el 80).
+    - name: Permitir tráfico HTTP en el puerto configurado
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: '80'
+        jump: ACCEPT
